@@ -102,6 +102,9 @@ populate_options(modes, modem_cfg.modes)
 enabled = s:option(Flag, "enabled", translate("Enable"))
 enabled.default = "1"
 
+clear_buffer = s:option(Flag, "clear_buffer", translate("Clear Module Side Buffer"))
+clear_buffer.description = translate("Clear the module side buffer before opening the serial port.[WARNING: This may cause unpredictable behavior.]")
+
 disabled_features = s:option(DynamicList, "disabled_features", translate("Disabled Features"))
 disabled_features.description = translate("Select features to disable for this modem.")
 populate_options(disabled_features, modem_cfg.disabled_features)

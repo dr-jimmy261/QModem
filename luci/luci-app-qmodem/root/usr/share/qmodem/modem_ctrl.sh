@@ -9,6 +9,7 @@ platform=$(uci get qmodem.$config_section.platform)
 define_connect=$(uci get qmodem.$config_section.define_connect)
 modem_path=$(uci get qmodem.$config_section.path)
 modem_slot=$(basename $modem_path)
+clear_buffer=$(uci get qmodem.$config_section.clear_buffer)
 
 [ -z "$define_connect" ] && {
     define_connect="1"

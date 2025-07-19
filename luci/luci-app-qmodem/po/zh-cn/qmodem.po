@@ -97,7 +97,6 @@ msgstr "Swisscom (CH)"
 msgid "Salt (CH)"
 msgstr "Salt (CH)"
 
-
 msgid "Vodafone (DE)"
 msgstr "Vodafone (DE)"
 
@@ -647,9 +646,6 @@ msgstr "制造商"
 msgid "Quectel"
 msgstr "移远"
 
-msgid "Simcom"
-msgstr "芯讯通（Simcom）"
-
 msgid "Sierra Wireless"
 msgstr "Sierra无线"
 
@@ -860,3 +856,9 @@ msgstr "V4/V6 存活检测"
 
 msgid "Only for AT dial modem."
 msgstr "只适用于AT拨号模组。"
+
+msgid "Clear Module Side Buffer"
+msgstr "清理模组侧缓冲区"
+
+msgid "Clear the module side buffer before opening the serial port.[WARNING: This may cause unpredictable behavior.]"
+msgstr "在打开串口之前清理模组侧缓冲区。[警告：这可能会导致不可预测的行为。]"

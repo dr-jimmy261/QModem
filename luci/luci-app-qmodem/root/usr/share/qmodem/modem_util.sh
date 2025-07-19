@@ -6,9 +6,10 @@ at()
     local at_port=$1
     local new_str="${2/[$]/$}"
 	local atcmd="${new_str/\"/\"}"
+	[ "$clear_buffer" == "1" ] && options="$options -M"
 	#过滤空行
     #sms_tool_q -d $at_port at "$atcmd"
-	tom_modem -d $at_port -o a -c "$atcmd"
+	tom_modem -d $at_port -o a -c "$atcmd" $options
 }
 
 fastat()
