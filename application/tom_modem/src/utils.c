@@ -206,6 +206,8 @@ int match_option(char *option_name)
             return SMS_INDEX;
         case GREEDY_READ_S:
             return GREEDY_READ;
+        case CLEAR_MODEM_SIDE_BUFFERS_S:
+            return CLEAR_MODEM_SIDE_BUFFERS;
         default:
             return -1;
         }
@@ -264,6 +266,10 @@ int match_option(char *option_name)
         else if (strcmp(long_option, GREEDY_READ_L) == 0)
         {
             return GREEDY_READ;
+        }
+        else if (strcmp(long_option, CLEAR_MODEM_SIDE_BUFFERS_L) == 0)
+        {
+            return CLEAR_MODEM_SIDE_BUFFERS;
         }
         else
         {
@@ -403,6 +409,7 @@ int usage(char* name)
     err_msg("  -p, --sms_pdu <sms pdu>  SMS PDU");
     err_msg("  -i, --sms_index <sms index>  SMS index");
     err_msg("  -g, --greedy_read Default: off, Greedy read mode, if set, each round it get new data from tty device, it will reset the timeout");
+    err_msg("  -M, --clear_modem_side_buffers Default: off, Clear modem side buffers before operation, it will flush the tty device buffers");
     #ifdef USE_SEMAPHORE
     err_msg("  -C, --cleanup Semaphore cleanup");
     #endif
@@ -450,6 +457,7 @@ void dump_profile()
     dbg_msg("SMS PDU: %s", s_profile.sms_pdu);
     dbg_msg("SMS index: %d", s_profile.sms_index);
     dbg_msg("Greedy read: %d", s_profile.greedy_read);
+    dbg_msg("Clear modem side buffers: %d", s_profile.clear_modem_side_buffers);
 }
 int display_sms_in_json(SMS_T **sms,int num)
 {
