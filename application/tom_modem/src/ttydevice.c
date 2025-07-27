@@ -358,7 +358,7 @@ int tty_read_keyword(FILE *fdi, AT_MESSAGE_T *message, char *key_word, PROFILE_T
             // Check for termination conditions
             int termination_result = is_at_termination_line(line_buffer, key_word);
             if (termination_result > 0) {
-                if (termination_result == 2) {
+                if (termination_result == 2 || termination_result == 1) {
                     // Keyword match
                     dbg_msg("Keyword '%s' found", key_word ? key_word : "NULL");
                     exitcode = SUCCESS;
