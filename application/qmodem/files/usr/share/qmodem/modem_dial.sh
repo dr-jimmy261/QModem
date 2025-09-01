@@ -767,7 +767,7 @@ at_dial()
                 "unisoc")
                     at_command="AT+CGACT=1,$pdp_index"
                     cgdcont_command="AT+CGDCONT=$pdp_index,\"$pdp_type\",\"$apn\""
-                    if [ -n "$auth" ]；then
+                    if [ -n "$auth" ] ; then
                         case $auth in
                             "pap") 
                                 auth_num=1 ;;
