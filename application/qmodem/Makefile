@@ -5,7 +5,7 @@ include $(INCLUDE_DIR)/kernel.mk
 include ../../version.mk
 
 PKG_NAME:=qmodem
-PKG_RELEASE:=$(QMODEM_RELEASE)
+PKG_RELEASE:=$(AUTORELEASE)
 PKG_VERSION:=$(QMODEM_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
@@ -28,18 +28,12 @@ define Package/$(PKG_NAME)
 		+jq +bc\
 		+coreutils +coreutils-stat \
 		+usbutils \
-		+PACKAGE_luci-app-qmodem_INCLUDE_rdisc6:rdisc6 \
-		+PACKAGE_luci-app-qmodem_INCLUDE_ndisc6:ndisc6 \
+		+ndisc6 \
 		+PACKAGE_luci-app-qmodem_INCLUDE_generic-qmi-wwan:kmod-usb-net-qmi-wwan \
 		+PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan:kmod-qmi_wwan_q \
 		+PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan:kmod-qmi_wwan_f \
 		+PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan:kmod-qmi_wwan_s \
-		+PACKAGE_luci-app-qmodem_VENDOR_MHI_PCIe_DRIVER:kmod-pcie_mhi \
-		+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan \
-		+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-pci-generic \
-		+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-pci-generic \
-		+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan-ctrl \
-		+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan-mbim \
+		+PACKAGE_luci-app-qmodem_INCLUDE_ADD_PCI_SUPPORT:kmod-pcie_mhi \
 		+PACKAGE_luci-app-qmodem_INCLUDE_ADD_PCI_SUPPORT:pciutils \
 		+PACKAGE_luci-app-qmodem_INCLUDE_ADD_MTK_T7XX_SUPPORT:umbim \
 		+PACKAGE_luci-app-qmodem_INCLUDE_ADD_MTK_T7XX_SUPPORT:kmod-mtk-t7xx \
