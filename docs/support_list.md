@@ -17,6 +17,7 @@ em160r-gl | lte12 |✔ usb(qmi,ecm,mbim,rndis) | ✘
 rg200u-cn | unisoc |✔ usb(ecm,mbim,rndis,ncm) | ✘
 rg801 | hisilicon |✔ usb(ecm,rndis,ncm) | ✘
 rm500u-cn | unisoc |✔ usb(ecm,mbim,rndis,ncm) | ✘
+rm500u-cnv | unisoc |✔ usb(ecm,mbim,rndis,ncm) | ✘
 rm500u-ea | unisoc |✔ usb(ecm,mbim,rndis,ncm) | ✘
 rm500s-ce | qualcomm |✔ usb(qmi,gobinet,ecm,mbim,rndis,ncm) | ✔ pcie(qmi,gobinet,mbim)
 rm500q-cn | qualcomm |✔ usb(qmi,gobinet,ecm,mbim,rndis,ncm) | ✘
