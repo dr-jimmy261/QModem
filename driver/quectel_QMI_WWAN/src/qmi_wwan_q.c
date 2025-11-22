@@ -1356,8 +1356,12 @@ static int qmap_register_device(sQmiWwanQmap * pDev, u8 offset_id)
 #endif
 	priv->agg_skb = NULL;
 	priv->agg_count = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,18,0)
 	hrtimer_init(&priv->agg_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	priv->agg_hrtimer.function = rmnet_usb_tx_agg_timer_cb;
+#else
+	hrtimer_setup(&priv->agg_hrtimer, rmnet_usb_tx_agg_timer_cb, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+#endif
 	INIT_WORK(&priv->agg_wq, rmnet_usb_tx_agg_work);
 	ktime_get_ts64(&priv->agg_time);
 	spin_lock_init(&priv->agg_lock);
@@ -2139,7 +2143,14 @@ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
 #endif
 		}
 	if (!_usbnet_get_stats64)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION( 6,10,0 ))
 		_usbnet_get_stats64 = dev->net->netdev_ops->ndo_get_stats64;
+#else
+		/* From kernel 6.10+, usbnet sets pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS (352f5b3282), but removed ndo_get_stats64 (9cb3d523c1) */
+		/* Use dev_get_tstats64 to read per-CPU stats when NETDEV_PCPU_STAT_TSTATS was set */
+		if (dev->net->pcpu_stat_type == NETDEV_PCPU_STAT_TSTATS)
+			_usbnet_get_stats64 = dev_get_tstats64;
+#endif
 	dev->net->netdev_ops = &qmi_wwan_netdev_ops;
 
 	ql_net_ethtool_ops = *dev->net->ethtool_ops;
@@ -2540,6 +2551,14 @@ static const struct usb_device_id products[] = {
 	{ QMI_FIXED_RAWIP_INTF(0x2C7C, 0x0800, 4, sdx55) },  /* Quectel RG500 */
 	{ QMI_FIXED_RAWIP_INTF(0x2C7C, 0x0801, 4, sdx55) },  /* Quectel RG520 */
 	{ QMI_FIXED_RAWIP_INTF(0x2C7C, 0x0122, 4, sdx55) },  /* Quectel RG650 */
+	{ QMI_FIXED_RAWIP_INTF(0x05c6, 0x90d5, 3, sdx55) },  /* Foxconn T99W240T00 */
+	{ QMI_FIXED_RAWIP_INTF(0x05c6, 0x90db, 2, sdx55) },  /* SIM8200 */
+	{ QMI_FIXED_RAWIP_INTF(0x2dee, 0x4d22, 5, sdx55) }, /* Meige SRM815 */
+	{ QMI_FIXED_RAWIP_INTF(0x305a, 0x1421, 3, sdx55) },  /* gm800 */
+	{ QMI_FIXED_RAWIP_INTF(0x305a, 0x1403, 3, sdx55) },  /* gm800 */
+	{ QMI_FIXED_RAWIP_INTF(0x05C6, 0x9025, 4, sdx55) },
+	{ QMI_FIXED_RAWIP_INTF(0x05C6, 0x9091, 2, sdx55) },
+	{ QMI_FIXED_RAWIP_INTF(0x1BC7, 0x1070, 2, sdx55) },  /* Telit FN990A40 */
 	{ }					/* END */
 };
 MODULE_DEVICE_TABLE(usb, products);

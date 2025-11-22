@@ -18,6 +18,7 @@
 #define SMS_PDU_S 'p'
 #define SMS_INDEX_S 'i'
 #define GREEDY_READ_S 'g'
+#define USE_UBUS_S 'u'
 
 #define AT_CMD_L "at_cmd"
 #define TTY_DEV_L "tty_dev"
@@ -32,6 +33,7 @@
 #define SMS_PDU_L "sms_pdu"
 #define SMS_INDEX_L "sms_index"
 #define GREEDY_READ_L "greedy_read"
+#define USE_UBUS_L "use_ubus"
 
 //operations
 #define AT_OP_S 'a'
@@ -44,6 +46,12 @@
 #define SMS_SEND_OP_L "sms_send"
 #define SMS_DELETE_OP_S 'd'
 #define SMS_DELETE_OP_L "sms_delete"
+#define SMS_UNREAD_OP_S 'u'
+#define SMS_UNREAD_OP_L "unread_sms"
+#define SMS_MARK_READ_OP_S 'm'
+#define SMS_MARK_READ_OP_L "mark_read"
+#define AT_SENDONLY_OP_S 'o'
+#define AT_SENDONLY_OP_L "at_sendonly"
 #ifdef USE_SEMAPHORE
 #define CLEANUP_SEMAPHORE_OP_S 'C'
 #define CLEANUP_SEMAPHORE_OP_L "cleanup"
@@ -51,7 +59,9 @@
 #define SET_READ_STORAGE "AT+CPMS=\"%s\""
 #define SET_PDU_FORMAT "AT+CMGF=0"
 #define READ_ALL_SMS "AT+CMGL=4"
-#define SEND_SMS "AT+CMGS=%d"
+#define READ_UNREAD_SMS "AT+CMGL=0"
+#define MARK_SMS_READ "AT+CMGR=%d"
+#define SEND_SMS "AT+CMGS=%d\r\n"
 #define DELETE_SMS "AT+CMGD=%d"
 
 #define SMS_BUF_SIZE 65536
@@ -62,6 +72,12 @@
 #define SMS_TEXT_SIZE 256
 #define SMS_PDU_STR_SIZE 512
 #define SMS_PDU_HEX_SIZE 512
+
+// Transport layer enumeration
+typedef enum {
+    TRANSPORT_TTY = 0,
+    TRANSPORT_UBUS = 1
+} transport_type_t;
 
 // at_tool profile
 typedef struct _PROFILE {
@@ -88,6 +104,8 @@ typedef struct _PROFILE {
     char *sms_pdu;
     int sms_index;
     int greedy_read;
+    transport_type_t transport;  // Choose between TTY and UBUS
+    void *transport_ctx;         // Transport-specific context
 } PROFILE_T;
 
 
@@ -125,6 +143,7 @@ enum ERROR_CODES {
     INVALID_HEX,
     UNKNOWN_ERROR,
     BUFFER_OVERFLOW,
+    SEND_SMS_FAILED
 };
 
 enum SMS_CHARSET {
@@ -145,7 +164,8 @@ enum OPTIONS {
     DEBUG,
     SMS_PDU,
     SMS_INDEX,
-    GREEDY_READ
+    GREEDY_READ,
+    USE_UBUS
 };
 
 enum OPERATIONS {
@@ -155,6 +175,9 @@ enum OPERATIONS {
     SMS_READ_OP,
     SMS_SEND_OP,
     SMS_DELETE_OP,
+    SMS_UNREAD_OP,
+    SMS_MARK_READ_OP,
+    AT_SENDONLY_OP,
     CLEANUP_SEMAPHORE_OP
 };
 

@@ -3,15 +3,17 @@
 
 include $(TOPDIR)/rules.mk
 
+# Include unified version
+include ../../version.mk
+
 PKG_NAME:=luci-app-qmodem-sms
 LUCI_TITLE:=Luci qwrt modem sms support
-PKG_VERSION:=2.7.0
+PKG_VERSION:=$(QMODEM_VERSION)
 LUCI_PKGARCH:=all
-PKG_VERSION:=1
 PKG_LICENSE:=GPLv3
 PKG_LINCESE_FILES:=LICENSE
 PKG_MAINTAINER:=Tom <fjrcn@outlook.com>
-LUCI_DEPENDS:=+luci-app-qmodem
+LUCI_DEPENDS:=+luci-app-qmodem +sms-forwarder
 
 include $(TOPDIR)/feeds/luci/luci.mk
 

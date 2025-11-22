@@ -1,176 +1,95 @@
-# QModem
+# QModem (English)
+
+# Important Notice for WebUI Users and Developers:
+The ATD (AT Daemon) on the modem side is a legacy design with inconsistent implementations across different vendors, resulting in poor compatibility, concurrency issues, incomplete responses, and unstable service behavior.
+When using WebUI and QModem (or multiple modem management plugins) simultaneously, concurrent AT command execution can lead to incomplete information, ATD service crashes (typically due to vendor implementation issues), garbled output, AT command timeouts, and modem disconnections.
+
+**For Users**: Choose one modem management solution and avoid using multiple plugins simultaneously.
+
+**For WebUI Developers**: Consider using the ubus ATD plugin instead of relying on the modem's built-in ATD service. [Reference Documentation](docs/rpcd-at-daemon-userguide.md)
+
+**[中文 README](README.zh-cn.md)** | **English README**
 
 [![Auto compile with OpenWrt SDK](https://github.com/FUjr/modem_feeds/actions/workflows/main.yml/badge.svg)](https://github.com/FUjr/modem_feeds/actions/workflows/main.yml)
 
-QModem is a module management plugin compatible with OpenWRT version 21 and later. Developed in Lua, it is compatible with QWRT/LEDE/Immortalwrt/OpenWRT.
+**QModem** is a comprehensive cellular modem management system for OpenWRT-based routers. It provides a LuCI-based web interface for easy administration and advanced control over various cellular modems.
 
-(For js luci, please add the luci-compat package.)
+This project aims to provide a stable, extensible, and user-friendly solution for integrating cellular connectivity into OpenWRT.
 
-[Support List](./docs/support_list.md)
+## Features
 
-[toc]
+- **Broad Hardware Support**: Manages a wide range of USB and PCIe cellular modems from vendors like Quectel, Fibocom, and more.
+- **Intuitive Web Interface**: A clean LuCI interface for at-a-glance status monitoring and configuration.
+- **Advanced Modem Control**: Fine-tune your connection with features like band locking, cell locking, and network mode selection.
+- **SMS and Multi-WAN**: Includes optional plugins for sending/receiving SMS and configuring multi-WAN failover/load balancing.
+- **Robust and Stable**: Designed for reliability with features like slot-based device binding and optimized AT command handling.
 
-# Quick Start
+For a complete list of features and capabilities, please see the [User Guide](docs/user-guide.md).
 
-## Add Feed Source
+## 🏠 Related Project: Home Assistant Integration
 
-To use QModem, you first need to add a feed source in OpenWRT:
+Looking to monitor your OpenWrt router and QModem status from Home Assistant? Check out our companion project:
 
-```shell
-echo >> feeds.conf.default
-echo 'src-git modem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
-./scripts/feeds update qmodem
-./scripts/feeds install -a -p qmodem
-```
+### [OpenWrt Ubus Integration for Home Assistant](https://github.com/FUjr/homeassistant-openwrt-ubus)
 
-Force update library drivers (use this library's drivers):
+A custom Home Assistant integration that connects to OpenWrt routers via the ubus interface, providing:
 
-```shell
-./scripts/feeds install -a -f -p qmodem
-```
+- **📱 Device Tracking**: Monitor wireless devices and DHCP clients in real-time
+- **📊 System Monitoring**: Track uptime, load averages, memory usage
+- **📡 QModem Support**: Monitor 4G/LTE modem status, signal strength, and connection details
+- **📶 Wireless Stations**: Track station associations and signal information
+- **🔧 Easy Setup**: Simple configuration through Home Assistant UI
 
-## Integrate Packages
+![QModem Integration](https://github.com/FUjr/homeassistant-openwrt-ubus/blob/main/imgs/qmodem_info.png)
 
-Run the following command in the terminal to open the configuration menu:
+Perfect for integrating your QModem-powered OpenWrt router into your smart home ecosystem!
 
-```shell
-make menuconfig
-```
+[**View on GitHub →**](https://github.com/FUjr/homeassistant-openwrt-ubus)
 
-## Select and Install Packages
+## Getting Started
 
-In the configuration menu, you can select the following packages (all under Luci/Application):
+### Installation
 
+To install QModem, add the custom feed to your OpenWRT build environment and select the `luci-app-qmodem` packages in `make menuconfig`.
 
-| Package Name                          |                                                                                                          Functionality                                                                                                          |
-| ------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| **luci-app-qmodem**                   |                                                Provides module info, dialing settings, and advanced settings. Other features depend on this main program (backend included here).                                                |
-| **Add Lua Luci Homepage**             |                                                                   Adds Lua Luci homepage. If using luci2 (Js Luci) and selected, there will be two homepages.                                                                   |
-| **QMI Driver Selection**              |                                                                                     Choose between Generic QMI driver or Vendor QMI driver.                                                                                     |
-| **Quectel Connect Manager Selection** | Choose one of:<br>- Tom customized Quectel CM: With options to block default route addition and resolv.conf modification<br>- QWRT quectel-CM-5G: Uses QWRT's quectel-CM-5G<br>- NORMAL quectel-cm: Uses the standard quectel-cm |
-| **Add PCIe Modem SUPPORT**            |                                                                                         Select PCIe driver, requires kmod_mhi in feeds.                                                                                         |
-| **Add Qfirehose SUPPORT**             |                                                                                 Add Qfirehose support for Qualcomm chip module firmware upgrade.                                                                                 |
-| **luci-app-qmodem-hc**                |                                                                                Supports hc-g80 SIM card switching, exclusive to specific devices.                                                                                |
-| **luci-app-qmodem-mwan**              |                                                                                                   Supports multi-WAN settings.                                                                                                   |
-| **luci-app-qmodem-sms**               |                                                                                                       SMS sending feature.                                                                                                       |
-| **luci-app-qmodem-ttl**               |                                                                                                    TTL rewrite functionality.                                                                                                    |
+For detailed, step-by-step installation instructions, please refer to the **[Installation Guide](docs/user-guide.md#installation)**.
 
-# Project Introduction
+### Configuration
 
-## Why Choose This Project
+Once installed, QModem can be configured through the LuCI web interface under the "Network" -> "QModem" menu.
 
-- **Stability**: Improved system stability by caching and reducing AT command frequency.
-- **Extensibility**: Minimal API endpoints and unified backend design for easy development and expansion.
-- **Reliability**: Function separation ensures core functionality remains stable even if other features have issues.
-- **Multi-Module Support**: Modules and configurations are uniquely bound to slots, preventing confusion during reboots or hot-swapping.
-- **SMS Support**: Long SMS merging and Chinese SMS sending.
-- **Multi-Language Support**: Language resources separated for easy addition of new languages.
-- **IPv6 Support**: Partial IPv6 support under specific conditions (e.g., China Mobile card, rm50xq qmi/rmnet/mbim driver, using quectel-CM-M for dialing, extended prefix mode).
-- **Optimized Quectel-CM**: Improved version of Quectel-CM with options to prevent overwriting resolv.conf and default routes.
-- **[Newly Implemented AT Tool](docs/tom_modem.cn.md)**: Combines features from sendat, sms_tool, and gl_modem_at into a single tool for AT command handling.
+For a complete walkthrough of the web interface and all configuration options, please see the **[User Guide](docs/user-guide.md)**.
 
-## Module Information
+## Documentation
 
-![Homepage (Lua)](imgs/homepage.png)
+This project maintains comprehensive documentation to help users and developers.
 
-![Module Info](imgs/modem_info.png)
+- **[User Guide](docs/user-guide.md)**: The primary document for users. It covers installation, configuration, and all features of the web interface.
+- **[Developer Guide](docs/developer-guide.md)**: For those who want to contribute, adapt a new modem, or understand the inner workings of the project. It details the project structure, core scripts, and adaptation process.
+- **[Supported Hardware List](docs/support_list.md)**: A list of modems known to be compatible with QModem.
 
-## Advanced Module Settings
+## Contributing
 
-Configure dialing mode, network preferences, IMEI settings, cell locking, frequency locking, etc.
+Contributions are welcome! Whether it's adding support for a new modem, fixing a bug, or improving the documentation, your help is appreciated.
 
-![Advanced Settings - Lock Cell](imgs/modem_debug_lock_cell.png)
+Please start by reading the **[Developer Guide](docs/developer-guide.md)** to understand the project's structure and how to get started.
 
-![Advanced Settings - Lock Band](imgs/modem_debug_lock_band.png)
+## License
 
-## Dialing Overview
+This project is licensed under the Mozilla Public License Version 2.0. Please see the [LICENSE](LICENSE) file for full details.
 
-![Dialing Overview](imgs/dial_overview.png)
+---
 
-### Global Configuration
+**Documentation Notice**: This documentation is AI-generated. We welcome community contributions to update and improve it based on real-world usage experience.
 
-Provides global configuration options for unified module settings.
+**Note**: Commercial use of this software is strictly prohibited without prior permission.
 
-- **Reload Dialing**: Reloads the module configuration file to ensure settings take effect.
-- **Dialing Master Switch**: Enables dialing when switched on.
+## Acknowledgments
 
-### Configuration List
+This project builds upon the work of several other open-source projects and communities. We extend our thanks to the developers and contributors of:
 
-- Slot ID associates modules with configuration files to prevent confusion during changes.
-- Dialing-related settings require a redial to take effect.
-- Network interface name is the module alias; if left blank, it defaults to the slot ID.
-
-## SMS
-
-![SMS](imgs/modem_sms.png)
-
-## Mwan Configuration
-
-This page is the **MWAN Configuration** interface, helping users manage multiple WAN connections by monitoring specific IPs to ensure network stability and reliability. Users can customize connection priorities and interfaces for load balancing or failover.
-
-
-| Feature                | Description                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| **Enable MWAN**        |                                                                               |
-| Same Source Address    | Ensures traffic from the same source uses the same WAN port for a set time.   |
-| **IPv4 Configuration** |                                                                               |
-| Interface              | Select WAN interfaces (e.g.,`wan`, `usb0`) for different network connections. |
-| Tracking IP            | Enter specific IP addresses or domain names to monitor.                       |
-| Priority               | Set connection priority (1 to 255); lower values mean higher priority.        |
-
-## QModem Settings
-
-
-| Configuration                     | Description                                        |
-| --------------------------------- | -------------------------------------------------- |
-| **Disable Auto-Load/Remove**      | Disables all features below.                       |
-| **Enable PCIe Module Scan**       | Scans PCIe interfaces at startup (time-consuming). |
-| **Enable USB Module Scan**        | Scans USB interfaces at startup (time-consuming).  |
-| **Monitor Configured USB Ports**  | Monitors USB hot-plug events for configured slots. |
-| **Monitor Configured PCIe Ports** | Scans PCIe ports at startup for configured slots.  |
-
-### Slot Configuration
-
-This page allows users to configure each slot.
-
-
-| Configuration             | Description                                                                     |
-| ------------------------- | ------------------------------------------------------------------------------- |
-| **Slot Type**             | Choose the slot type (PCIe/USB) for device identification.                      |
-| **Slot ID**               | Enter the device's unique identifier (e.g.,`0001:11:00.0[pcie]`).               |
-| **SIM Card Indicator**    | Bind slot to corresponding indicator light for SIM card status.                 |
-| **Network Indicator**     | Bind slot to network status indicator for monitoring connection status.         |
-| **Enable 5G to Ethernet** | Enables communication via network interface for supported modules.              |
-| **Associated USB**        | Associates USB ports with PCIe ports for better AT communication compatibility. |
-
-### Module Configuration
-
-This page allows users to modify module configurations. It is an advanced feature, and incorrect usage may cause the device to malfunction. The primary purpose is to manually add modules not in the compatibility list.
-The configuration introduces `post_init` and `pre_dial` options, allowing users to set custom delays and send custom AT commands after module initialization or before dialing. Other options are self-explanatory.
-
-## Development Plan
-
-
-| Plan                                        | Progress |
-| ------------------------------------------- | -------- |
-| Separate backend from luci-app completely   | 0%       |
-| Switch to js luci                           | 5%       |
-| Support more modules                        | 0%       |
-| Use at_daemon to monitor module AT events   | 5%       |
-| Add phone functionality                     | 0%       |
-| Improve documentation                       | 0%       |
-| Add diagnostic features for user debugging  | 0%       |
-| Add contributor and maintainer info in code | 0%       |
-
-# Acknowledgments
-
-During the development of the module management plugin, the following repositories were referenced:
-
-
-| Project                                      | Reference Content                       |
-| -------------------------------------------- | --------------------------------------- |
-| https://github.com/Siriling/5G-Modem-Support | Module list and some AT implementations |
-| https://github.com/fujr/luci-app-4gmodem     | Adopted many ideas from this project    |
-| https://github.com/obsy/sms_tool             | AT command sending tool                 |
-| https://github.com/gl-inet/gl-modem-at       | AT command sending tool                 |
-| https://github.com/ouyangzq/sendat           | AT command sending tool                 |
+- [Siriling/5G-Modem-Support](https://github.com/Siriling/5G-Modem-Support)
+- [fujr/luci-app-4gmodem](https://github.com/fujr/luci-app-4gmodem)
+- [obsy/sms_tool](https://github.com/obsy/sms_tool)
+- [gl-inet/gl-modem-at](https://github.com/gl-inet/gl-modem-at)
+- [ouyangzq/sendat](https://github.com/ouyangzq/sendat)
