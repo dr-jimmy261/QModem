@@ -699,14 +699,8 @@ qmi_dial()
     if [ -n "$pdp_index" ] && [ "$userset_pdp_index" = "1" ]; then
         cmd_line="$cmd_line -n $pdp_index"
     fi
-    if [ "$manufacturer" = "telit" ];then
-        test_apn="cbnet"
-        [ "$apn" = "cbnet" ] && test_apn="auto"
-        $cmd_line -s $test_apn &
-        telit_cmd_pid=$!
-        sleep 1
-        kill $telit_cmd_pid 2>/dev/null
-        wait $telit_cmd_pid 2>/dev/null
+    if [ "$manufacturer" = "telit" ] && [ "$force_set_apn" != "1" ];then
+        m_debug 'please use force apn set for telit modem'
     fi
     if [ -n "$apn" ]; then
         cmd_line="$cmd_line -s $apn"
