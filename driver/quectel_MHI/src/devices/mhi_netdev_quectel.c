@@ -57,24 +57,26 @@ static bool netdev_is_rx_handler_busy(struct net_device *dev)
 }
 #endif
 
-struct rmnet_nss_cb {
-	int (*nss_create)(struct net_device *dev);
-	int (*nss_free)(struct net_device *dev);
-	int (*nss_tx)(struct sk_buff *skb);
-};
-static struct rmnet_nss_cb __read_mostly *nss_cb = NULL;
-#if defined(CONFIG_PINCTRL_IPQ807x) || defined(CONFIG_PINCTRL_IPQ5018)
-#ifdef CONFIG_RMNET_DATA
-#define CONFIG_QCA_NSS_DRV
+#ifdef CONFIG_QCA_NSS_DRV
+#if defined(CONFIG_PINCTRL_IPQ807x) || defined(CONFIG_PINCTRL_IPQ5018) || defined(CONFIG_PINCTRL_IPQ8074)
 #define CONFIG_USE_RMNET_DATA_FOR_SKIP_MEMCPY
+#include <rmnet_nss.h>
+//#ifdef CONFIG_RMNET_DATA //spf12.x have no macro defined, just for spf11.x
 /* define at qca/src/linux-4.4/drivers/net/ethernet/qualcomm/rmnet/rmnet_config.c */ //for spf11.x
 /* define at qsdk/qca/src/datarmnet/core/rmnet_config.c */ //for spf12.x
 /* set at qsdk/qca/src/data-kernel/drivers/rmnet-nss/rmnet_nss.c */
 /* need add DEPENDS:= kmod-rmnet-core in feeds/makefile */
 extern struct rmnet_nss_cb *rmnet_nss_callbacks __rcu __read_mostly;
 #endif
+#else
+struct rmnet_nss_cb {
+	int (*nss_create)(void *dev);
+	int (*nss_free)(void *dev);
+	int (*nss_tx)(void *skb);
+};
 #endif
-	
+
+static struct rmnet_nss_cb __read_mostly *nss_cb = NULL;
 
 int mhi_netdev_use_xfer_type_dma(unsigned chan)
 {
@@ -425,7 +427,8 @@ struct qmap_priv {
 	uint bridge_ipv4;
 	unsigned char bridge_mac[ETH_ALEN];
 #endif
-	uint use_qca_nss;	
+	uint use_qca_nss;
+	int nss_create_rc;
 };
 
 static struct mhi_netdev *ndev_to_mhi(struct net_device *ndev) {
@@ -712,20 +715,13 @@ static struct sk_buff * add_mbim_hdr(struct sk_buff *skb, u8 mux_id) {
 static struct sk_buff * add_qhdr(struct sk_buff *skb, u8 mux_id) {
 	struct qmap_hdr *qhdr;
 	int pad = 0;
-	struct sk_buff *new_skb = NULL;
 
 	pad = skb->len%4;
 	if (pad) {
 		pad = 4 - pad;
 		if (skb_tailroom(skb) < pad) {
-			new_skb = skb_copy_expand(skb, skb_headroom(skb) + sizeof(struct qmap_hdr),
-						  pad, GFP_ATOMIC);
-			if (!new_skb) {
-				printk("Failed to expand skb for padding\n");
-				return NULL;
-			}
-			dev_kfree_skb_any(skb);
-			skb = new_skb;
+			printk("skb_tailroom small!\n");
+			pad = 0;
 		}
 		if (pad)
 			__skb_put(skb, pad);
@@ -743,23 +739,14 @@ static struct sk_buff * add_qhdr_v5(struct sk_buff *skb, u8 mux_id) {
 	struct rmnet_map_header *map_header;
 	struct rmnet_map_v5_csum_header *ul_header;
 	u32 padding, map_datalen;
-	struct sk_buff *new_skb = NULL;
 
 	map_datalen = skb->len;
 	padding = map_datalen%4;
 	if (padding) {
 		padding = 4 - padding;
 		if (skb_tailroom(skb) < padding) {
-			new_skb = skb_copy_expand(skb, skb_headroom(skb) + 
-						 sizeof(struct rmnet_map_header) + 
-						 sizeof(struct rmnet_map_v5_csum_header),
-						 padding, GFP_ATOMIC);
-			if (!new_skb) {
-				printk("Failed to expand skb for padding\n");
-				return NULL;
-			}
-			dev_kfree_skb_any(skb);
-			skb = new_skb;
+			printk("skb_tailroom small!\n");
+			padding = 0;
 		}
 		if (padding)
 			__skb_put(skb, padding);
@@ -1618,6 +1605,85 @@ done:
 	return RX_HANDLER_CONSUMED;
 }
 
+static struct net_device * rmnet_data_register_device(struct mhi_netdev *pQmapDev, u8 offset_id, u8 mux_id)
+{
+	struct net_device *real_dev = pQmapDev->ndev;
+	struct net_device *rmnet_data_net;
+	struct qmap_priv *priv;
+	int err;
+	int use_qca_nss = !!nss_cb;
+	unsigned char temp_addr[ETH_ALEN];
+
+	rmnet_data_net = alloc_etherdev(sizeof(*priv));
+	if (!rmnet_data_net)
+		return NULL;
+
+	SET_NETDEV_DEV(rmnet_data_net, &real_dev->dev);
+	priv = netdev_priv(rmnet_data_net);
+	priv->offset_id = offset_id;
+	priv->real_dev = pQmapDev->ndev;
+	priv->self_dev = rmnet_data_net;
+	priv->pQmapDev = pQmapDev;
+	priv->qmap_version = pQmapDev->qmap_version;	
+	priv->mux_id = mux_id;
+	sprintf(rmnet_data_net->name, "%.12s.%d", real_dev->name, offset_id + 1);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+	__dev_addr_set(rmnet_data_net, real_dev->dev_addr, ETH_ALEN);
+#else
+	memcpy (rmnet_data_net->dev_addr, real_dev->dev_addr, ETH_ALEN);
+#endif
+	//Generate unique MAC address for each rmnet_data interface
+	memcpy(temp_addr, rmnet_data_net->dev_addr, ETH_ALEN);
+	temp_addr[5] = offset_id + 1;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+	__dev_addr_set(rmnet_data_net, temp_addr, ETH_ALEN);
+#else
+	memcpy(rmnet_data_net->dev_addr, temp_addr, ETH_ALEN);
+#endif
+
+#if defined(MHI_NETDEV_STATUS64)
+	priv->stats64 = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
+	if (!priv->stats64)
+		goto out_free_newdev;
+#endif
+
+#ifdef QUECTEL_BRIDGE_MODE
+	priv->bridge_mode = !!(pQmapDev->bridge_mode & BIT(offset_id));
+#endif
+	priv->use_qca_nss = use_qca_nss;
+
+	rmnet_data_net->netdev_ops = &mhi_netdev_ops_ip;
+	rmnet_data_net->mtu = 1500;
+	rmnet_data_net->needed_headroom = sizeof(struct rmnet_map_header);
+	rmnet_data_net->watchdog_timeo = 60*HZ;
+	eth_random_addr(rmnet_data_net->broadcast);
+#if defined(MHI_NETDEV_STATUS64)
+	rmnet_data_net->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
+#endif
+
+	err = register_netdev(rmnet_data_net);
+	pr_info("%s(%s)=%d\n", __func__, rmnet_data_net->name, err);
+	if (err < 0)
+		goto out_free_newdev;
+
+#ifdef CONFIG_QCA_NSS_DRV
+	if (use_qca_nss && nss_cb) {
+		priv->nss_create_rc = nss_cb->nss_create(rmnet_data_net);
+		pr_err("nss_create(%s) = %d\n", rmnet_data_net->name, priv->nss_create_rc);
+	}
+#endif
+
+	return rmnet_data_net;
+
+out_free_newdev:
+#if defined(MHI_NETDEV_STATUS64)
+	if (priv->stats64)
+		free_percpu(priv->stats64);
+#endif
+	free_netdev(rmnet_data_net);
+	return NULL;
+}
+
 static struct net_device * rmnet_vnd_register_device(struct mhi_netdev *pQmapDev, u8 offset_id, u8 mux_id)
 {
 	struct net_device *real_dev = pQmapDev->ndev;
@@ -1669,12 +1735,8 @@ static struct net_device * rmnet_vnd_register_device(struct mhi_netdev *pQmapDev
 
 	priv->agg_skb = NULL;
 	priv->agg_count = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,18,0)
 	hrtimer_init(&priv->agg_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	priv->agg_hrtimer.function = rmnet_vnd_tx_agg_timer_cb;
-#else
-	hrtimer_setup(&priv->agg_hrtimer, rmnet_vnd_tx_agg_timer_cb, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-#endif
 	INIT_WORK(&priv->agg_wq, rmnet_vnd_tx_agg_work);
 	ktime_get_ts64(&priv->agg_time);
 	spin_lock_init(&priv->agg_lock);
@@ -1728,7 +1790,7 @@ static struct net_device * rmnet_vnd_register_device(struct mhi_netdev *pQmapDev
 
 out_free_newdev:
 	free_netdev(qmap_net);
-	return NULL;
+	return qmap_net;
 }
 
 static void  rmnet_vnd_unregister_device(struct net_device *qmap_net) {
@@ -2609,14 +2671,9 @@ static const struct net_device_ops mhi_netdev_ops_ip = {
 static void mhi_netdev_get_drvinfo (struct net_device *ndev, struct ethtool_drvinfo *info)
 {
 	//struct mhi_netdev *mhi_netdev = ndev_to_mhi(ndev);
-	/* strlcpy() is deprecated in kernel 6.8.0+, using strscpy instead */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6,8,0))
-	strlcpy(info->driver, "pcie_mhi", sizeof(info->driver));
-	strlcpy(info->version, PCIE_MHI_DRIVER_VERSION, sizeof(info->version));
-#else
-	strscpy(info->driver, "pcie_mhi", sizeof(info->driver));
-	strscpy(info->version, PCIE_MHI_DRIVER_VERSION, sizeof(info->version));
-#endif
+
+	strscpy (info->driver, "pcie_mhi", sizeof info->driver);
+	strscpy (info->version, PCIE_MHI_DRIVER_VERSION, sizeof info->version);
 }
 
 static const struct ethtool_ops mhi_netdev_ethtool_ops = {
@@ -3193,8 +3250,6 @@ static void mhi_netdev_remove(struct mhi_device *mhi_dev)
 
 	MSG_LOG("Remove notification received\n");
 #ifndef MHI_NETDEV_ONE_CARD_MODE
-#ifndef	CONFIG_USE_RMNET_DATA_FOR_SKIP_MEMCPY
-
 	unsigned i;
 	write_lock_irq(&mhi_netdev->pm_lock);
 	mhi_netdev->enabled = false;
@@ -3203,17 +3258,16 @@ static void mhi_netdev_remove(struct mhi_device *mhi_dev)
 	for (i = 0; i < mhi_netdev->qmap_mode; i++) {
 		if (mhi_netdev->mpQmapNetDev[i]
 			&& mhi_netdev->mpQmapNetDev[i] != mhi_netdev->ndev) {
-			rmnet_vnd_unregister_device(mhi_netdev->mpQmapNetDev[i]);
-		}
-		mhi_netdev->mpQmapNetDev[i] = NULL;
+				rmnet_vnd_unregister_device(mhi_netdev->mpQmapNetDev[i]);
+			}
+			mhi_netdev->mpQmapNetDev[i] = NULL;
 	}
-		
+	
 	rtnl_lock();
-	if (mhi_netdev->ndev 
+	if (mhi_netdev->ndev
 		&& rtnl_dereference(mhi_netdev->ndev->rx_handler) == rmnet_rx_handler)
-		netdev_rx_handler_unregister(mhi_netdev->ndev);
+			netdev_rx_handler_unregister(mhi_netdev->ndev);
 	rtnl_unlock();
-#endif
 #endif
 	while ((skb = skb_dequeue (&mhi_netdev->skb_chain)))
 		dev_kfree_skb_any(skb);
@@ -3291,7 +3345,7 @@ static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 #endif
 
 	if (!strcmp(id->chan, "IP_HW0"))
-		mhi_netdev->interface_name = "rmnet_mhi";
+		mhi_netdev->interface_name = "rmnet_data";
 	else if (!strcmp(id->chan, "IP_SW0"))
 		mhi_netdev->interface_name = "mhi_swip";
 	else
@@ -3302,12 +3356,10 @@ static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 	mhi_netdev->use_rmnet_usb = 1;
 	if ((mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0306)
 		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0308)
-		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0309)
-		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x011a)
 		|| (mhi_dev->vendor == 0x1eac && mhi_dev->dev_id == 0x1004)
+		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x011a)
 		|| (mhi_dev->vendor == 0x1eac && mhi_dev->dev_id == 0x100b)
-		|| (mhi_dev->vendor == 0x105b && mhi_dev->dev_id == 0xe0f5)
-		|| (mhi_dev->vendor == 0x03f0 && mhi_dev->dev_id == 0x0a6c)
+		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0309)
 	) {
 		mhi_netdev->qmap_version = 9;
 	}
@@ -3363,17 +3415,31 @@ static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 	else if (1) {
 		BUG_ON(mhi_netdev->net_type != MHI_NET_RMNET);
 		for (i = 0; i < mhi_netdev->qmap_mode; i++) {
-			mhi_netdev->rmnet_info.mux_id[i] = QUECTEL_QMAP_MUX_ID + i;
-			strcpy(mhi_netdev->rmnet_info.ifname[i], "use_rmnet_data");
+			u8 mux_id = QUECTEL_QMAP_MUX_ID + i;
+			if (mhi_mbim_enabled) {
+				mux_id = mhi_netdev->mbim_mux_id + i;
+			}
+			
+			// Create actual rmnet_data interfaces for NSS mode
+			mhi_netdev->mpQmapNetDev[i] = rmnet_data_register_device(mhi_netdev, i, mux_id);
+			if (mhi_netdev->mpQmapNetDev[i]) {
+				strcpy(mhi_netdev->rmnet_info.ifname[i], mhi_netdev->mpQmapNetDev[i]->name);
+				mhi_netdev->rmnet_info.mux_id[i] = mux_id;
+			}
 		}
+		
+		rtnl_lock();
+		// Register rx handler for NSS packet processing
+		netdev_rx_handler_register(mhi_netdev->ndev, rmnet_rx_handler, NULL);
+		rtnl_unlock();
 	}
 #endif
 	else if (mhi_netdev->use_rmnet_usb) {
 		for (i = 0; i < mhi_netdev->qmap_mode; i++) {
-			u8 mux_id = QUECTEL_QMAP_MUX_ID + i;
+			u8 mux_id = QUECTEL_QMAP_MUX_ID+i;
 			if (mhi_mbim_enabled) {
 				mux_id = mhi_netdev->mbim_mux_id + i;
-			}			
+			}
 			mhi_netdev->mpQmapNetDev[i] = rmnet_vnd_register_device(mhi_netdev, i, mux_id);
 			if (mhi_netdev->mpQmapNetDev[i]) {
 				strcpy(mhi_netdev->rmnet_info.ifname[i], mhi_netdev->mpQmapNetDev[i]->name);
