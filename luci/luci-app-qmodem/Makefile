@@ -42,6 +42,9 @@ choice
   prompt "Qualcomm QMI WWAN Driver Selection"
   default PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan
 
+  config PACKAGE_luci-app-qmodem_INCLUDE_nss-qmi-wwan
+  bool "NSS QMI driver"
+
   config PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan
   bool "Vendor QMI driver"
 
@@ -55,6 +58,9 @@ choice
 	
 	config PACKAGE_luci-app-qmodem_VENDOR_MHI_PCIe_DRIVER
 	bool "Use Vendor MHI PCIe Driver"
+	
+	config PACKAGE_luci-app-qmodem_NSS_MHI_PCIe_DRIVER
+	bool "Use NSS MHI PCIe Driver"
 
 	config  PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER
 	bool "Use Generic MHI PCIe Driver"
