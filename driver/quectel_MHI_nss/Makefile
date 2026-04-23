@@ -59,7 +59,7 @@ define Build/Compile
 		modules
 endef
 
-define KernelPackage/pcie_mhi/install
+define KernelPackage/pcie_mhi_nss/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/pcie_mhi $(1)/etc/init.d/pcie_mhi
 endef
