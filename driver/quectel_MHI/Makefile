@@ -18,6 +18,9 @@ define KernelPackage/pcie_mhi
   SUBMENU:=WWAN Support
   TITLE:=Kernel pcie driver for MHI device
   FILES:=$(PKG_BUILD_DIR)/pcie_mhi.ko
+  DEPENDS:=+TARGET_qualcommax_ipq807x:kmod-rmnet-nss \
+           +TARGET_qualcommax_ipq60xx:kmod-rmnet-nss \
+		   +TARGET_qualcommax_ipq50xx:kmod-rmnet-nss
 # AUTOLOAD:=$(call AutoLoad,90,pcie_mhi)
 endef
 
@@ -30,6 +33,11 @@ EXTRA_CFLAGS+= \
 	-Wno-unused-variable \
 	-Wno-missing-prototypes \
 	-Wno-missing-declarations
+
+ifeq ($(CONFIG_TARGET_qualcommax_ipq807x)$(CONFIG_TARGET_qualcommax_ipq50xx),y)
+EXTRA_CFLAGS += -I$(STAGING_DIR)/usr/include/qca-nss-rmnet
+EXTRA_CFLAGS += -DCONFIG_QCA_NSS_DRV
+endif
 
 MAKE_OPTS:= \
 	ARCH="$(LINUX_KARCH)" \
@@ -45,8 +53,9 @@ define Build/Prepare
 endef
 
 define Build/Compile
-	$(MAKE) -C "$(LINUX_DIR)" \
+	+$(KERNEL_MAKE) -C "$(LINUX_DIR)" \
 		$(MAKE_OPTS) \
+	 M="$(PKG_BUILD_DIR)" \
 		modules
 endef
 

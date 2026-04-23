@@ -57,24 +57,23 @@ static bool netdev_is_rx_handler_busy(struct net_device *dev)
 }
 #endif
 
-struct rmnet_nss_cb {
-	int (*nss_create)(struct net_device *dev);
-	int (*nss_free)(struct net_device *dev);
-	int (*nss_tx)(struct sk_buff *skb);
-};
-static struct rmnet_nss_cb __read_mostly *nss_cb = NULL;
-#if defined(CONFIG_PINCTRL_IPQ807x) || defined(CONFIG_PINCTRL_IPQ5018)
-#ifdef CONFIG_RMNET_DATA
-#define CONFIG_QCA_NSS_DRV
-#define CONFIG_USE_RMNET_DATA_FOR_SKIP_MEMCPY
+#ifdef CONFIG_QCA_NSS_DRV
+#include <rmnet_nss.h>
+//#ifdef CONFIG_RMNET_DATA //spf12.x have no macro defined, just for spf11.x
 /* define at qca/src/linux-4.4/drivers/net/ethernet/qualcomm/rmnet/rmnet_config.c */ //for spf11.x
 /* define at qsdk/qca/src/datarmnet/core/rmnet_config.c */ //for spf12.x
 /* set at qsdk/qca/src/data-kernel/drivers/rmnet-nss/rmnet_nss.c */
 /* need add DEPENDS:= kmod-rmnet-core in feeds/makefile */
 extern struct rmnet_nss_cb *rmnet_nss_callbacks __rcu __read_mostly;
+#else
+struct rmnet_nss_cb {
+	int (*nss_create)(struct net_device *dev);
+	int (*nss_free)(struct net_device *dev);
+	int (*nss_tx)(struct sk_buff *skb);
+};
 #endif
-#endif
-	
+
+static struct rmnet_nss_cb __read_mostly *nss_cb = NULL;
 
 int mhi_netdev_use_xfer_type_dma(unsigned chan)
 {
