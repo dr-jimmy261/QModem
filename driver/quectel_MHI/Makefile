@@ -19,7 +19,6 @@ define KernelPackage/pcie_mhi
   TITLE:=Kernel pcie driver for MHI device
   FILES:=$(PKG_BUILD_DIR)/pcie_mhi.ko
   DEPENDS:=+TARGET_qualcommax_ipq807x:kmod-rmnet-nss \
-           +TARGET_qualcommax_ipq60xx:kmod-rmnet-nss \
 		   +TARGET_qualcommax_ipq50xx:kmod-rmnet-nss
 # AUTOLOAD:=$(call AutoLoad,90,pcie_mhi)
 endef

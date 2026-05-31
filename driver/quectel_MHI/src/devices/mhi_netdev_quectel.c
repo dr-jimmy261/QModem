@@ -57,7 +57,7 @@ static bool netdev_is_rx_handler_busy(struct net_device *dev)
 }
 #endif
 
-#ifdef CONFIG_QCA_NSS_DRV
+#ifdef CONFIG_NSS_DRV_RMNET_ENABLE
 #include <rmnet_nss.h>
 //#ifdef CONFIG_RMNET_DATA //spf12.x have no macro defined, just for spf11.x
 /* define at qca/src/linux-4.4/drivers/net/ethernet/qualcomm/rmnet/rmnet_config.c */ //for spf11.x
