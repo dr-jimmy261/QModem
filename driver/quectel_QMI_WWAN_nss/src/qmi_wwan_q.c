@@ -33,6 +33,8 @@
 #include <linux/usb/usbnet.h>
 #include <linux/usb/cdc-wdm.h>
 
+#include <rmnet_nss.h>
+
 #ifndef ETH_P_MAP
 #define ETH_P_MAP 0xDA1A
 #endif
