@@ -2209,7 +2209,7 @@ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
 			int qmap_size = (dev->driver_info->data)&0xFF;
 			int idProduct = le16_to_cpu(dev->udev->descriptor.idProduct);
 			int lte_a = (idProduct == 0x0306 || idProduct == 0x030B || idProduct == 0x0512 || idProduct == 0x0620 ||
-							idProduct == 0x0800 || idProduct == 0x0801 || idProduct == 0x0122 || idProduct == 0x0316);
+							idProduct == 0x0800 || idProduct == 0x0801 || idProduct == 0x0122 || idProduct == 0x0316 || idProduct == 0x0104 || idProduct == 0x0109);
 
 			if (qmap_size > 4096 || dev->udev->speed >= USB_SPEED_SUPER) { //if meet this requirements, must be LTE-A or 5G
 				lte_a = 1;
@@ -2231,7 +2231,7 @@ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
 
 				if (pQmapDev->qmap_mode > 1)
 					pQmapDev->use_rmnet_usb = 1;
-				else if (idProduct == 0x0800 || idProduct == 0x0801 || idProduct == 0x0122)
+				else if (idProduct == 0x0800 || idProduct == 0x0801 || idProduct == 0x0122 || idProduct == 0x0104 || idProduct == 0x0109)
 					pQmapDev->use_rmnet_usb = 1; //benefit for ul data agg
 #ifdef QMI_NETDEV_ONE_CARD_MODE
 				if(pQmapDev->use_rmnet_usb == 1 && pQmapDev->qmap_mode == 1)
@@ -2544,6 +2544,8 @@ static const struct usb_device_id products[] = {
 	{ QMI_FIXED_RAWIP_INTF(0x2C7C, 0x0800, 4, sdx55) },  /* Quectel RG500 */
 	{ QMI_FIXED_RAWIP_INTF(0x2C7C, 0x0801, 4, sdx55) },  /* Quectel RG520 */
 	{ QMI_FIXED_RAWIP_INTF(0x2C7C, 0x0122, 4, sdx55) },  /* Quectel RG650 */
+    { QMI_FIXED_RAWIP_INTF(0x2cb7, 0x0104, 4, sdx55) },  /* Fibocom FG150/FM150/NL952/FG101 */
+    { QMI_FIXED_RAWIP_INTF(0x2cb7, 0x0109, 2, sdx55) },  /* Fibocom FG150/FM150 */
 	{ QMI_FIXED_RAWIP_INTF(0x05c6, 0x90d5, 3, sdx55) },  /* Foxconn T99W240T00 */
 	{ QMI_FIXED_RAWIP_INTF(0x05c6, 0x90db, 2, sdx55) },  /* SIM8200 */
 	{ QMI_FIXED_RAWIP_INTF(0x02dee, 0x4d22, 5, sdx55) }, /* Meige SRM815 */
