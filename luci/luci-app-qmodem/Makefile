@@ -47,10 +47,6 @@ choice
 
   config PACKAGE_luci-app-qmodem_INCLUDE_generic-qmi-wwan
   bool "Generic QMI driver"
-
-  config PACKAGE_luci-app-qmodem_INCLUDE_nss-qmi-wwan
-  bool "NSS QMI driver"
-  depends on TARGET_qualcommax_ipq807x || TARGET_qualcommax_ipq50xx
 endchoice
 
 choice
@@ -63,10 +59,6 @@ choice
 
 	config  PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER
 	bool "Use Generic MHI PCIe Driver"
-
-	config  PACKAGE_luci-app-qmodem_NSS_MHI_PCIe_DRIVER
-	bool "Use NSS MHI PCIe Driver"
-	depends on TARGET_qualcommax_ipq807x || TARGET_qualcommax_ipq50xx
 endchoice
 
 choice
