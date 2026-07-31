@@ -103,6 +103,7 @@ struct qmap_hdr {
     u16 pkt_len;
 } __packed;
 #define QUECTEL_QMAP_MUX_ID 0x81
+#define MBIM_MUX_ID_SDX7X	112	//sdx7x is 112-126, others is 0-14
 
 enum rmnet_map_v5_header_type {
 	RMNET_MAP_HEADER_TYPE_UNKNOWN,
@@ -322,6 +323,7 @@ struct mhi_netdev {
 #endif
 
 	MHI_MBIM_CTX mbim_ctx;
+	u32 mbim_mux_id;
 
 	u32 mru;
 	u32 max_mtu;
@@ -625,7 +627,7 @@ static struct sk_buff * add_mbim_hdr(struct sk_buff *skb, u8 mux_id) {
 	struct mhi_mbim_hdr *mhdr;
 	__le32 sign;
 	u8 *c;
-	u16 tci = mux_id - QUECTEL_QMAP_MUX_ID;
+	u16 tci = mux_id;
 	unsigned int skb_len = skb->len;
 
 	if (qmap_mode > 1)
@@ -1278,12 +1280,12 @@ static void rmnet_mbim_rx_handler(void *dev, struct sk_buff *skb_in)
 			goto error;
 		}
 
-		if ((qmap_mode == 1 && tci != 0) || (qmap_mode > 1 && tci > qmap_mode)) {
+		if ((qmap_mode == 1 && tci != mhi_netdev->mbim_mux_id) || (qmap_mode > 1 && (tci - mhi_netdev->mbim_mux_id) > qmap_mode)) {
 			MSG_ERR("unsupported tci %d by now\n", tci);
 			goto error;
 		}
 		tci = abs(tci);
-		qmap_net = pQmapDev->mpQmapNetDev[qmap_mode == 1 ? 0 : tci - 1];
+		qmap_net = pQmapDev->mpQmapNetDev[qmap_mode == 1 ? 0 : tci - 1 - mhi_netdev->mbim_mux_id];
 
 		dpe16 = ndp16->dpe16;
 
@@ -2114,7 +2116,7 @@ static netdev_tx_t mhi_netdev_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (mhi_netdev->net_type == MHI_NET_MBIM) {
-		if (add_mbim_hdr(skb, QUECTEL_QMAP_MUX_ID) == NULL) {
+		if (add_mbim_hdr(skb, mhi_netdev->mbim_mux_id) == NULL) {
 			dev_kfree_skb_any (skb);
 			return NETDEV_TX_OK;
 		}
@@ -2924,8 +2926,13 @@ static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 	mhi_netdev->qmap_mode = qmap_mode;
 	mhi_netdev->qmap_version = 5; 
 	mhi_netdev->use_rmnet_usb = 1;
+	mhi_netdev->mbim_mux_id = 0;
+	if (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0309) {
+		mhi_netdev->mbim_mux_id = MBIM_MUX_ID_SDX7X;
+	}
 	if ((mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0306)
 		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0308)
+		|| (mhi_dev->vendor == 0x17cb && mhi_dev->dev_id == 0x0309)
 		|| (mhi_dev->vendor == 0x1eac && mhi_dev->dev_id == 0x1004)
 	) {
 		mhi_netdev->qmap_version = 9;
@@ -2967,11 +2974,17 @@ static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 		mhi_netdev->mpQmapNetDev[0] = mhi_netdev->ndev;
 		strcpy(mhi_netdev->rmnet_info.ifname[0], mhi_netdev->mpQmapNetDev[0]->name);
 		mhi_netdev->rmnet_info.mux_id[0] = QUECTEL_QMAP_MUX_ID;
+		if (mhi_mbim_enabled) {
+			mhi_netdev->rmnet_info.mux_id[0] = mhi_netdev->mbim_mux_id;
+		}
 #else
 		unsigned i;
 
 		for (i = 0; i < mhi_netdev->qmap_mode; i++) {
 			u8 mux_id = QUECTEL_QMAP_MUX_ID+i;
+			if (mhi_mbim_enabled) {
+				mux_id = mhi_netdev->mbim_mux_id + i;
+			}
 			mhi_netdev->mpQmapNetDev[i] = rmnet_vnd_register_device(mhi_netdev, i, mux_id);
 			if (mhi_netdev->mpQmapNetDev[i]) {
 				strcpy(mhi_netdev->rmnet_info.ifname[i], mhi_netdev->mpQmapNetDev[i]->name);
