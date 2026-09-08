@@ -163,51 +163,81 @@ G7bitToAscii(char* buffer, int buffer_length)
 	return buffer_length;
 }
 
-#define NPC '?'
+/* Decode one strict UTF-8 BMP code point. Four-byte sequences are rejected:
+ * SMS DCS 0x08 is UCS-2, and surrogate-pair interoperability is unreliable. */
+static int
+NextUtf8Bmp(const unsigned char** input, unsigned int* codepoint)
+{
+	const unsigned char* s = *input;
+	unsigned int cp;
 
-static const int latin1_to_gsm7bits[256] = {
-  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC, 0x0a,  NPC,-0x0a, 0x0d,  NPC,  NPC,
-  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,
- 0x20, 0x21, 0x22, 0x23, 0x02, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
- 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
- 0x00, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
- 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a,-0x3c,-0x2f,-0x3e,-0x14, 0x11,
-  NPC, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
- 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a,-0x28,-0x40,-0x29,-0x3d,  NPC,
-  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,
-  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,
-  NPC, 0x40,  NPC, 0x01, 0x24, 0x03,  NPC, 0x5f,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,
-  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC, 0x60,
-  NPC,  NPC,  NPC,  NPC, 0x5b, 0x0e, 0x1c, 0x09,  NPC, 0x1f,  NPC,  NPC,  NPC,  NPC,  NPC,  NPC,
-  NPC, 0x5d,  NPC,  NPC,  NPC,  NPC, 0x5c,  NPC, 0x0b,  NPC,  NPC,  NPC, 0x5e,  NPC,  NPC, 0x1e,
- 0x7f,  NPC,  NPC,  NPC, 0x7b, 0x0f, 0x1d,  NPC, 0x04, 0x05,  NPC,  NPC, 0x07,  NPC,  NPC,  NPC,
-  NPC, 0x7d, 0x08,  NPC,  NPC,  NPC, 0x7c,  NPC, 0x0c, 0x06,  NPC,  NPC, 0x7e,  NPC,  NPC,  NPC,
-};
+	if (s[0] < 0x80) {
+		if (s[0] == 0) return 0;
+		*codepoint = s[0];
+		*input = s + 1;
+		return 1;
+	}
+	if (s[0] >= 0xC2 && s[0] <= 0xDF && (s[1] & 0xC0) == 0x80) {
+		cp = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
+		*codepoint = cp;
+		*input = s + 2;
+		return 1;
+	}
+	if (s[0] >= 0xE0 && s[0] <= 0xEF &&
+	    (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80 &&
+	    !(s[0] == 0xE0 && s[1] < 0xA0) &&
+	    !(s[0] == 0xED && s[1] >= 0xA0)) {
+		cp = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+		*codepoint = cp;
+		*input = s + 3;
+		return 1;
+	}
+	return -1;
+}
 
 static int
-AsciiToG7bit(const char* buffer, int buffer_length, unsigned char* output_buffer)
+Gsm7Codepoint(unsigned int cp, unsigned char out[2])
 {
-	int i, j, val;
-
-	j=0;
-	for (i = 0; i < buffer_length; i++) {
-		val = latin1_to_gsm7bits[buffer[i] & 0xFF];
-		if (val < 0) {
-			output_buffer[j++] = GSM_7BITS_ESCAPE;
-			output_buffer[j++] = -1*val;
-		} else {
-			if (((buffer[i] & 0xFF) & 0xE0) == 0xC0) { /* test for two byte utf8 char */
-				val = NPC;
-				i++;
-			} else if (((buffer[i] & 0xFF) & 0xF0) == 0xE0) { /* test for three byte utf8 char */
-				val = NPC;
-				i++;
-				i++;
-			}
-			output_buffer[j++] = val;
-		}
+	if ((cp >= 0x20 && cp <= 0x23) || (cp >= 0x25 && cp <= 0x3F) ||
+	    (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) {
+		out[0] = (unsigned char)cp;
+		return 1;
 	}
-	return j;
+	switch (cp) {
+	case '@': out[0]=0x00; return 1; case 0x00A3: out[0]=0x01; return 1;
+	case '$': out[0]=0x02; return 1; case 0x00A5: out[0]=0x03; return 1;
+	case 0x00E8: out[0]=0x04; return 1; case 0x00E9: out[0]=0x05; return 1;
+	case 0x00F9: out[0]=0x06; return 1; case 0x00EC: out[0]=0x07; return 1;
+	case 0x00F2: out[0]=0x08; return 1; case 0x00C7: out[0]=0x09; return 1;
+	case '\n': out[0]=0x0A; return 1; case 0x00D8: out[0]=0x0B; return 1;
+	case 0x00F8: out[0]=0x0C; return 1; case '\r': out[0]=0x0D; return 1;
+	case 0x00C5: out[0]=0x0E; return 1; case 0x00E5: out[0]=0x0F; return 1;
+	case 0x0394: out[0]=0x10; return 1; case '_': out[0]=0x11; return 1;
+	case 0x03A6: out[0]=0x12; return 1; case 0x0393: out[0]=0x13; return 1;
+	case 0x039B: out[0]=0x14; return 1; case 0x03A9: out[0]=0x15; return 1;
+	case 0x03A0: out[0]=0x16; return 1; case 0x03A8: out[0]=0x17; return 1;
+	case 0x03A3: out[0]=0x18; return 1; case 0x0398: out[0]=0x19; return 1;
+	case 0x039E: out[0]=0x1A; return 1; case 0x00C6: out[0]=0x1C; return 1;
+	case 0x00E6: out[0]=0x1D; return 1; case 0x00DF: out[0]=0x1E; return 1;
+	case 0x00C9: out[0]=0x1F; return 1; case 0x00A4: out[0]=0x24; return 1;
+	case 0x00A1: out[0]=0x40; return 1; case 0x00C4: out[0]=0x5B; return 1;
+	case 0x00D6: out[0]=0x5C; return 1; case 0x00D1: out[0]=0x5D; return 1;
+	case 0x00DC: out[0]=0x5E; return 1; case 0x00A7: out[0]=0x5F; return 1;
+	case 0x00BF: out[0]=0x60; return 1; case 0x00E4: out[0]=0x7B; return 1;
+	case 0x00F6: out[0]=0x7C; return 1; case 0x00F1: out[0]=0x7D; return 1;
+	case 0x00FC: out[0]=0x7E; return 1; case 0x00E0: out[0]=0x7F; return 1;
+	case '\f': out[0]=GSM_7BITS_ESCAPE; out[1]=0x0A; return 2;
+	case '^': out[0]=GSM_7BITS_ESCAPE; out[1]=0x14; return 2;
+	case '{': out[0]=GSM_7BITS_ESCAPE; out[1]=0x28; return 2;
+	case '}': out[0]=GSM_7BITS_ESCAPE; out[1]=0x29; return 2;
+	case '\\': out[0]=GSM_7BITS_ESCAPE; out[1]=0x2F; return 2;
+	case '[': out[0]=GSM_7BITS_ESCAPE; out[1]=0x3C; return 2;
+	case '~': out[0]=GSM_7BITS_ESCAPE; out[1]=0x3D; return 2;
+	case ']': out[0]=GSM_7BITS_ESCAPE; out[1]=0x3E; return 2;
+	case '|': out[0]=GSM_7BITS_ESCAPE; out[1]=0x40; return 2;
+	case 0x20AC: out[0]=GSM_7BITS_ESCAPE; out[1]=0x65; return 2;
+	default: return 0;
+	}
 }
 
 // Encode a digit based phone number for SMS based format.
@@ -256,8 +286,8 @@ DecodePhoneNumber(const unsigned char* buffer, int phone_number_length, char* ou
 
 // Encode a SMS message to PDU
 int
-pdu_encode(const char* service_center_number, const char* phone_number, const char* sms_text,
-	   unsigned char* output_buffer, int buffer_size)
+pdu_encode_ex(const char* service_center_number, const char* phone_number, const char* sms_text,
+	      unsigned char* output_buffer, int buffer_size, int* encoding, int* units)
 {	
 	if (buffer_size < 2)
 		return -1;
@@ -300,26 +330,66 @@ pdu_encode(const char* service_center_number, const char* phone_number, const ch
 		return -1;  // Check if it has space for four more bytes.
 
 
+	/* Validate UTF-8 once and prepare both possible payloads. */
+	unsigned char gsm_text[SMS_MAX_7BIT_TEXT_LENGTH];
+	unsigned char ucs2_text[140];
+	const unsigned char* cursor = (const unsigned char*)sms_text;
+	int gsm_length = 0, ucs2_length = 0, codepoints = 0, all_gsm = 1;
+	while (*cursor) {
+		unsigned int cp;
+		unsigned char mapped[2];
+		int decoded = NextUtf8Bmp(&cursor, &cp);
+		int mapped_length;
+		if (decoded <= 0 || cp == 0 || cp > 0xFFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return -1;
+		if (codepoints < 70) {
+			ucs2_text[ucs2_length++] = (unsigned char)(cp >> 8);
+			ucs2_text[ucs2_length++] = (unsigned char)(cp & 0xFF);
+		}
+		codepoints++;
+		mapped_length = Gsm7Codepoint(cp, mapped);
+		if (!mapped_length) all_gsm = 0;
+		else if (all_gsm) {
+			if (gsm_length + mapped_length > SMS_MAX_7BIT_TEXT_LENGTH) return -1;
+			gsm_text[gsm_length++] = mapped[0];
+			if (mapped_length == 2) gsm_text[gsm_length++] = mapped[1];
+		}
+		if (!all_gsm && codepoints > 70) return -1;
+	}
+	if (codepoints == 0) return -1;
+
 	// 4. Protocol identifiers.
 	output_buffer[output_buffer_length++] = 0x00;  // TP-PID: Protocol identifier.
-	output_buffer[output_buffer_length++] = 0x00;  // TP-DCS: Data coding scheme.
+	output_buffer[output_buffer_length++] = all_gsm ? 0x00 : 0x08; // TP-DCS.
 	output_buffer[output_buffer_length++] = 0xB0;  // TP-VP: Validity: 10 days
 
 	// 5. SMS message.
-	int sms_text_length = strlen(sms_text);
-	char sms_text_7bit[2*SMS_MAX_7BIT_TEXT_LENGTH];
-	sms_text_length = AsciiToG7bit(sms_text, sms_text_length, sms_text_7bit);
-	if (sms_text_length > SMS_MAX_7BIT_TEXT_LENGTH)
-		return -1;
-	output_buffer[output_buffer_length++] = sms_text_length;
-	length = EncodePDUMessage(sms_text_7bit, sms_text_length,
-				  output_buffer + output_buffer_length, 
+	if (all_gsm) {
+		output_buffer[output_buffer_length++] = gsm_length;
+		length = EncodePDUMessage((const char*)gsm_text, gsm_length,
+				  output_buffer + output_buffer_length,
 				  buffer_size - output_buffer_length);
-	if (length < 0)
-		return -1;
-	output_buffer_length += length;
+		if (length < 0) return -1;
+		output_buffer_length += length;
+		if (encoding) *encoding = PDU_TEXT_GSM7;
+		if (units) *units = gsm_length;
+	} else {
+		if (output_buffer_length + 1 + ucs2_length > buffer_size) return -1;
+		output_buffer[output_buffer_length++] = ucs2_length;
+		memcpy(output_buffer + output_buffer_length, ucs2_text, ucs2_length);
+		output_buffer_length += ucs2_length;
+		if (encoding) *encoding = PDU_TEXT_UCS2;
+		if (units) *units = codepoints;
+	}
 
 	return output_buffer_length;
+}
+
+int
+pdu_encode(const char* service_center_number, const char* phone_number, const char* sms_text,
+	   unsigned char* output_buffer, int buffer_size)
+{
+	return pdu_encode_ex(service_center_number, phone_number, sms_text,
+			     output_buffer, buffer_size, NULL, NULL);
 }
 
 int pdu_decode(const unsigned char* buffer, int buffer_length,
@@ -422,4 +492,3 @@ int pdu_decode(const unsigned char* buffer, int buffer_length,
 
 	return output_sms_text_length;
 }
-

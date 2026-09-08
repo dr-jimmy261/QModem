@@ -194,8 +194,6 @@ int main(int argc, char* argv[])
 	{
 		if(argc < 3)
 			usage();
-		if(strlen(argv[2]) > 160)
-			fprintf(stderr,"sms message too long: '%s'\n", argv[2]);
 	}else if (!strcmp("delete",argv[0]))
 	{
 		if(argc < 2)
@@ -245,8 +243,10 @@ int main(int argc, char* argv[])
 	if (!strcmp("send", argv[0]))
 	{
 		int pdu_len = pdu_encode("", argv[1], argv[2], pdu, sizeof(pdu));
-		if (pdu_len < 0)
-			fprintf(stderr,"error encoding to PDU: %s \"%s\n", argv[1], argv[2]);
+		if (pdu_len < 0) {
+			fprintf(stderr,"error encoding SMS: invalid UTF-8, unsupported character, or message too long\n");
+			return 1;
+		}
 
 		const int pdu_len_except_smsc = pdu_len - 1 - pdu[0];
 		snprintf(cmdstr, sizeof(cmdstr), "AT+CMGS=%d\r\n", pdu_len_except_smsc);

@@ -21,6 +21,16 @@ enum { SMS_MAX_PDU_LENGTH  = 256 };
 int pdu_encode(const char* service_center_number, const char* phone_number, const char* text,
 	      unsigned char* pdu, int pdu_size);
 
+enum pdu_text_encoding {
+	PDU_TEXT_GSM7 = 0,
+	PDU_TEXT_UCS2 = 1
+};
+
+/* As pdu_encode(), also returning the selected alphabet and its character
+ * count. UCS-2 input is strict UTF-8 and is limited to the BMP. */
+int pdu_encode_ex(const char* service_center_number, const char* phone_number, const char* text,
+		  unsigned char* pdu, int pdu_size, int* encoding, int* units);
+
 /* 
  * Decode an SMS message. Output the decoded message into the sms text buffer.
  * Returns the length of the SMS dencoded message or a negative number in
