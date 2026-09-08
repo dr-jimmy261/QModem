@@ -12,7 +12,7 @@
 #ifndef SAHARA_H
 #define SAHARA_H
 
-#define Q_SAHARA_RAW_BUF_SZ (4*1024)
+#define Q_SAHARA_RAW_BUF_SZ (28 * 1024)
 #define Q_SAHARA_STATUS_ZERO 0x00
 #define Q_SAHARA_MODE_ZERO 0x00
 #define Q_SAHARA_MODE_ONE 0x01
