@@ -14,6 +14,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
+#include <stdint.h>
+#include <time.h>
 #include <termios.h>
 
 #include "pdu_lib/pdu.h"
@@ -22,6 +25,7 @@ static void usage()
 {
 	fprintf(stderr,
 		"usage: [options] send phoneNumber message\n"
+		"       [options] send_raw_pdu pdu\n"
 		"       [options] recv\n"
 		"       [options] delete msg_index | all\n"
 		"       [options] status\n"
@@ -30,6 +34,7 @@ static void usage()
 		"options:\n"
 		"\t-b <baudrate> (default: 115200)\n"
 		"\t-c coding scheme (for ussd, 0 - 7BIT, 2 - UCS2, default: detect)\n"
+		"\t-t <seconds> AT command timeout (default: 5)\n"
 		"\t-d <tty device> (default: /dev/ttyUSB0)\n"
 		"\t-D debug (for ussd and at)\n"
 		"\t-f <date/time format> (for sms/recv)\n"
@@ -43,17 +48,26 @@ static void usage()
 
 static struct termios save_tio;
 static int port = -1;
+static int termios_saved = 0;
+static int mhi_transport = 0;
 static const char* dev = "/dev/ttyUSB0";
 static const char* storage = "";
 static const char* dateformat = "%D %T";
+static char sms_reference[64];
+static char sms_error[128];
 
 static void setserial(int baudrate)
 {
 	struct termios t;
-	if (tcgetattr(port, &t) < 0)
-		fprintf(stderr,"tcgetattr(%s)\n", dev);
+	if (mhi_transport)
+		return;
+	if (tcgetattr(port, &t) < 0) {
+		fprintf(stderr,"tcgetattr(%s): %s\n", dev, strerror(errno));
+		return;
+	}
 
 	memmove(&save_tio, &t, sizeof(t));
+	termios_saved = 1;
 
 	cfmakeraw(&t);
 
@@ -106,10 +120,15 @@ static void setserial(int baudrate)
 
 static void resetserial()
 {
-	if (tcsetattr(port, TCSANOW, &save_tio) < 0)
-		fprintf(stderr, "failed tcsetattr(%s): %s\n", dev, strerror(errno));
-	tcflush(port, TCIOFLUSH);
+	if (port < 0)
+		return;
+	if (!mhi_transport && termios_saved) {
+		if (tcsetattr(port, TCSANOW, &save_tio) < 0)
+			fprintf(stderr, "failed tcsetattr(%s): %s\n", dev, strerror(errno));
+		tcflush(port, TCIOFLUSH);
+	}
 	close(port);
+	port = -1;
 }
 
 static void timeout(int sig __attribute__((unused)))
@@ -160,6 +179,347 @@ static void print_json_escape_char(char c1, char c2)
 	}
 }
 
+static int is_mhi_device(const char *path)
+{
+	return !strncmp(path, "/dev/mhi_", 9) || !strncmp(path, "/dev/wwan", 9);
+}
+
+static int64_t monotonic_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0)
+		return 0;
+	return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int write_all_deadline(const unsigned char *data, size_t length, int timeout_ms)
+{
+	size_t written = 0;
+	int64_t deadline = monotonic_ms() + timeout_ms;
+
+	while (written < length) {
+		struct pollfd pfd = { .fd = port, .events = POLLOUT };
+		int64_t remaining = deadline - monotonic_ms();
+		int wait_ms = remaining > INT32_MAX ? INT32_MAX : (remaining > 0 ? (int)remaining : 0);
+		int polled = poll(&pfd, 1, wait_ms);
+		if (polled < 0 && errno == EINTR)
+			continue;
+		if (polled < 0)
+			return -errno;
+		if (polled == 0)
+			return -ETIMEDOUT;
+		if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+			return -ENODEV;
+		if (pfd.revents & POLLOUT) {
+			ssize_t count = write(port, data + written, length - written);
+			if (count > 0) {
+				written += (size_t)count;
+				continue;
+			}
+			if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+				continue;
+			return count < 0 ? -errno : -EIO;
+		}
+	}
+	return 0;
+}
+
+static void drain_input(int timeout_ms)
+{
+	int64_t deadline = monotonic_ms() + timeout_ms;
+	unsigned char buffer[1024];
+
+	for (;;) {
+		struct pollfd pfd = { .fd = port, .events = POLLIN };
+		int64_t remaining = deadline - monotonic_ms();
+		int wait_ms = remaining > 100 ? 100 : (remaining > 0 ? (int)remaining : 0);
+		int polled = poll(&pfd, 1, wait_ms);
+		if (polled <= 0)
+			return;
+		if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+			return;
+		if (pfd.revents & POLLIN) {
+			ssize_t count = read(port, buffer, sizeof(buffer));
+			if (count > 0)
+				continue;
+			if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+				continue;
+			return;
+		}
+	}
+}
+
+static int response_has_line(const char *response, const char *token)
+{
+	const char *line = response;
+	while (*line) {
+		const char *end = strchr(line, '\n');
+		const char *start = line;
+		const char *stop = end ? end : line + strlen(line);
+		while (start < stop && (*start == '\r' || *start == ' ' || *start == '\t'))
+			start++;
+		while (stop > start && (stop[-1] == '\r' || stop[-1] == ' ' || stop[-1] == '\t'))
+			stop--;
+		if ((size_t)(stop - start) == strlen(token) && !strncmp(start, token, strlen(token)))
+			return 1;
+		if (!end)
+			break;
+		line = end + 1;
+	}
+	return 0;
+}
+
+static int response_has_error(const char *response)
+{
+	const char *line = response;
+	while (*line) {
+		const char *end;
+		while (*line == '\r' || *line == '\n' || *line == ' ' || *line == '\t')
+			line++;
+		end = strchr(line, '\n');
+		if (!strncmp(line, "ERROR", 5) || !strncmp(line, "+CMS ERROR:", 11) ||
+			!strncmp(line, "+CME ERROR:", 11))
+			return 1;
+		if (!end)
+			break;
+		line = end + 1;
+	}
+	return 0;
+}
+
+static void remember_modem_error(const char *response)
+{
+	const char *line = response;
+	sms_error[0] = '\0';
+	while (*line) {
+		const char *end;
+		const char *start;
+		size_t length;
+		while (*line == '\r' || *line == '\n' || *line == ' ' || *line == '\t')
+			line++;
+		end = strchr(line, '\n');
+		if (!end)
+			end = line + strlen(line);
+		start = line;
+		if (!strncmp(start, "ERROR", 5) || !strncmp(start, "+CMS ERROR:", 11) ||
+			!strncmp(start, "+CME ERROR:", 11)) {
+			while (end > start && (end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t'))
+				end--;
+			length = (size_t)(end - start);
+			if (length >= sizeof(sms_error))
+				length = sizeof(sms_error) - 1;
+			memcpy(sms_error, start, length);
+			sms_error[length] = '\0';
+			return;
+		}
+		if (!strchr(line, '\n'))
+			break;
+		line = end + 1;
+	}
+}
+
+static int response_has_cmgs(const char *response)
+{
+	const char *line = response;
+	while (*line) {
+		while (*line == '\r' || *line == '\n' || *line == ' ' || *line == '\t')
+			line++;
+		if (!strncmp(line, "+CMGS:", 6))
+			return 1;
+		line = strchr(line, '\n');
+		if (!line)
+			break;
+	}
+	return 0;
+}
+
+static void remember_cmgs_reference(const char *response)
+{
+	const char *line = response;
+	sms_reference[0] = '\0';
+	while (*line) {
+		const char *end;
+		const char *value;
+		size_t length;
+		while (*line == '\r' || *line == '\n' || *line == ' ' || *line == '\t')
+			line++;
+		if (strncmp(line, "+CMGS:", 6)) {
+			end = strchr(line, '\n');
+			if (!end)
+				break;
+			line = end + 1;
+			continue;
+		}
+		value = line + 6;
+		while (*value == ' ' || *value == '\t')
+			value++;
+		end = strchr(value, '\n');
+		if (!end)
+			end = value + strlen(value);
+		while (end > value && (end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t'))
+			end--;
+		length = (size_t)(end - value);
+		if (length >= sizeof(sms_reference))
+			length = sizeof(sms_reference) - 1;
+		memcpy(sms_reference, value, length);
+		sms_reference[length] = '\0';
+		return;
+	}
+}
+
+static int read_response_until(int timeout_ms, int prompt, int cmgs, char *response, size_t response_size)
+{
+	size_t used = 0;
+	int64_t deadline = monotonic_ms() + timeout_ms;
+	unsigned char buffer[1024];
+
+	if (!response_size)
+		return -EINVAL;
+	response[0] = '\0';
+	for (;;) {
+		struct pollfd pfd = { .fd = port, .events = POLLIN };
+		int64_t remaining = deadline - monotonic_ms();
+		int wait_ms = remaining > INT32_MAX ? INT32_MAX : (remaining > 0 ? (int)remaining : 0);
+		int polled = poll(&pfd, 1, wait_ms);
+		if (polled < 0 && errno == EINTR)
+			continue;
+		if (polled == 0)
+			return -ETIMEDOUT;
+		if (polled < 0 || (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
+			return -ENODEV;
+		if (!(pfd.revents & POLLIN))
+			continue;
+
+		ssize_t count = read(port, buffer, sizeof(buffer));
+		if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+			continue;
+		if (count <= 0)
+			return count == 0 ? -ENODEV : -errno;
+		if (used >= response_size - 1)
+			return -EOVERFLOW;
+		if ((size_t)count >= response_size - used)
+			count = (ssize_t)(response_size - used - 1);
+		if (count > 0) {
+			memcpy(response + used, buffer, (size_t)count);
+			used += (size_t)count;
+			response[used] = '\0';
+		}
+
+		if (response_has_error(response)) {
+			remember_modem_error(response);
+			return -EIO;
+		}
+		if (prompt && strchr(response, '>'))
+			return 0;
+		if (!prompt && response_has_line(response, "OK") && (!cmgs || response_has_cmgs(response)))
+			return 0;
+	}
+}
+
+static void cancel_sms_input(void)
+{
+	static const unsigned char escape = 0x1b;
+	char response[512];
+	if (write_all_deadline(&escape, 1, 500) == 0)
+		read_response_until(1000, 0, 0, response, sizeof(response));
+}
+
+static int send_command_wait_ok(const char *command, int timeout_ms, char *response, size_t response_size)
+{
+	char line[256];
+	int length = snprintf(line, sizeof(line), "%s\r\n", command);
+	if (length < 0 || (size_t)length >= sizeof(line))
+		return -EINVAL;
+	if (write_all_deadline((const unsigned char *)line, (size_t)length, timeout_ms) < 0)
+		return -EIO;
+	return read_response_until(timeout_ms, 0, 0, response, response_size);
+}
+
+static int parse_hex_pdu(const char *text, unsigned char *pdu, size_t pdu_size, int *pdu_length)
+{
+	size_t length = strlen(text);
+	if (!length || (length & 1) || length / 2 > pdu_size)
+		return -EINVAL;
+	for (size_t i = 0; i < length; i += 2) {
+		int high = char_to_hex(text[i]);
+		int low = char_to_hex(text[i + 1]);
+		if (high < 0 || low < 0)
+			return -EINVAL;
+		pdu[i / 2] = (unsigned char)((high << 4) | low);
+	}
+	if (pdu[0] > length / 2 - 1)
+		return -EINVAL;
+	*pdu_length = (int)(length / 2);
+	return 0;
+}
+
+static int send_sms_pdu(const unsigned char *pdu, int pdu_length)
+{
+	char response[8192];
+	char command[64];
+	char hex[2 * SMS_MAX_PDU_LENGTH + 1];
+	int smsc_length;
+	int tpdu_length;
+	int length;
+	sms_reference[0] = '\0';
+	sms_error[0] = '\0';
+
+	if (!pdu || pdu_length < 1 || pdu_length > SMS_MAX_PDU_LENGTH)
+		return -EINVAL;
+	smsc_length = pdu[0];
+	tpdu_length = pdu_length - 1 - smsc_length;
+	if (tpdu_length < 0)
+		return -EINVAL;
+	for (int i = 0; i < pdu_length; i++)
+		sprintf(hex + 2 * i, "%02X", pdu[i]);
+	hex[2 * pdu_length] = '\0';
+
+	drain_input(500);
+	if (send_command_wait_ok("AT", 5000, response, sizeof(response)) < 0)
+		return -EIO;
+	if (send_command_wait_ok("AT+CMGF=0", 5000, response, sizeof(response)) < 0)
+		return -EIO;
+
+	length = snprintf(command, sizeof(command), "AT+CMGS=%d\r\n", tpdu_length);
+	if (length < 0 || (size_t)length >= sizeof(command))
+		return -EINVAL;
+	if (write_all_deadline((const unsigned char *)command, (size_t)length, 5000) < 0)
+		return -EIO;
+	{
+		int prompt_result = read_response_until(10000, 1, 0, response, sizeof(response));
+		if (prompt_result < 0) {
+			if (prompt_result == -ETIMEDOUT)
+				cancel_sms_input();
+			return prompt_result;
+		}
+	}
+
+	if (write_all_deadline((const unsigned char *)hex, strlen(hex), 5000) < 0) {
+		cancel_sms_input();
+		return -EIO;
+	}
+	{
+		static const unsigned char ctrl_z = 0x1a;
+		if (write_all_deadline(&ctrl_z, 1, 5000) < 0)
+			return -EIO;
+	}
+	if (read_response_until(60000, 0, 1, response, sizeof(response)) < 0)
+		return -EIO;
+	if (!response_has_cmgs(response) || !response_has_line(response, "OK"))
+		return -EIO;
+	remember_cmgs_reference(response);
+	return 0;
+}
+
+static int send_sms_text(const char *phone, const char *text)
+{
+	unsigned char pdu[SMS_MAX_PDU_LENGTH];
+	int pdu_length = pdu_encode("", phone, text, pdu, sizeof(pdu));
+	if (pdu_length < 0)
+		return -EINVAL;
+	return send_sms_pdu(pdu, pdu_length);
+}
+
 int main(int argc, char* argv[])
 {
 	int ch;
@@ -169,11 +529,13 @@ int main(int argc, char* argv[])
 	int jsonoutput = 0;
 	int debug = 0;
 	int dcs = -1;
+	int user_set_timeout = 5;
 
-	while ((ch = getopt(argc, argv, "b:c:d:Ds:f:jRr")) != -1){
+	while ((ch = getopt(argc, argv, "b:c:t:d:Ds:f:jRr")) != -1){
 		switch (ch) {
 		case 'b': baudrate = atoi(optarg); break;
 		case 'c': dcs = atoi(optarg); break;
+		case 't': user_set_timeout = atoi(optarg); break;
 		case 'd': dev = optarg; break;
 		case 'D': debug = 1; break;
 		case 's': storage = optarg; break;
@@ -194,6 +556,10 @@ int main(int argc, char* argv[])
 	{
 		if(argc < 3)
 			usage();
+	}else if (!strcmp("send_raw_pdu", argv[0]))
+	{
+		if(argc < 2)
+			usage();
 	}else if (!strcmp("delete",argv[0]))
 	{
 		if(argc < 2)
@@ -212,23 +578,71 @@ int main(int argc, char* argv[])
 		usage();
 
 	signal(SIGALRM,timeout);
+	/* A removed MHI channel may report EPIPE while a transfer is queued. */
+	signal(SIGPIPE, SIG_IGN);
 
 	char cmdstr[100];
 	char pdustr[2*SMS_MAX_PDU_LENGTH+4];
 	unsigned char pdu[SMS_MAX_PDU_LENGTH];
 
-	// open the port
-
+	// Open once. MHI UCI nodes are raw character devices with partial termios
+	// compatibility; USB ports retain the normal serial setup.
+	mhi_transport = is_mhi_device(dev);
 	port = open(dev, O_RDWR|O_NONBLOCK|O_NOCTTY);
-	if (port < 0)
-		fprintf(stderr,"open(%s)\n", dev);
+	if (port < 0) {
+		fprintf(stderr,"open(%s): %s\n", dev, strerror(errno));
+		return 2;
+	}
 	setserial(baudrate);
 	atexit(resetserial);
 
-	close(port);
-	port = open(dev, O_RDWR|O_NOCTTY);
-	if (port < 0)
-		fprintf(stderr,"reopen(%s)\n", dev);
+	if (!strcmp("send", argv[0])) {
+		int result = send_sms_text(argv[1], argv[2]);
+		if (result == 0) {
+			if (sms_reference[0])
+				printf("sms sent sucessfully: %s\n", sms_reference);
+			else
+				printf("sms sent sucessfully\n");
+			return 0;
+		}
+		if (result == -EINVAL)
+			fprintf(stderr,"error encoding SMS: invalid UTF-8, unsupported character, or message too long\n");
+		else if (sms_error[0])
+			fprintf(stderr,"sms not sent, modem response: %s\n", sms_error);
+		else
+			fprintf(stderr,"sms not sent, command or modem transaction failed\n");
+		return 1;
+	}
+	if (!strcmp("send_raw_pdu", argv[0])) {
+		unsigned char raw_pdu[SMS_MAX_PDU_LENGTH];
+		int raw_length;
+		int result = parse_hex_pdu(argv[1], raw_pdu, sizeof(raw_pdu), &raw_length);
+		if (result == 0)
+			result = send_sms_pdu(raw_pdu, raw_length);
+		if (result == 0) {
+			if (sms_reference[0])
+				printf("sms sent sucessfully: %s\n", sms_reference);
+			else
+				printf("sms sent sucessfully\n");
+			return 0;
+		}
+		if (result == -EINVAL)
+			fprintf(stderr,"error encoding SMS PDU: invalid hexadecimal PDU or length\n");
+		else if (sms_error[0])
+			fprintf(stderr,"sms not sent, modem response: %s\n", sms_error);
+		else
+			fprintf(stderr,"sms not sent, command or modem transaction failed\n");
+		return 1;
+	}
+
+	/* The legacy stdio reader expects a blocking descriptor.  Keep the
+	 * descriptor non-blocking for the raw sender so its poll deadlines also
+	 * cover a full MHI transmit ring. */
+	{
+		int flags = fcntl(port, F_GETFL, 0);
+		if (flags >= 0)
+			fcntl(port, F_SETFL, flags & ~O_NONBLOCK);
+	}
 
 	FILE* pf = fdopen(port, "w");
 	FILE* pfi = fdopen(port, "r");
@@ -240,53 +654,6 @@ int main(int argc, char* argv[])
 	}
 
 	char buf[1024];
-	if (!strcmp("send", argv[0]))
-	{
-		int pdu_len = pdu_encode("", argv[1], argv[2], pdu, sizeof(pdu));
-		if (pdu_len < 0) {
-			fprintf(stderr,"error encoding SMS: invalid UTF-8, unsupported character, or message too long\n");
-			return 1;
-		}
-
-		const int pdu_len_except_smsc = pdu_len - 1 - pdu[0];
-		snprintf(cmdstr, sizeof(cmdstr), "AT+CMGS=%d\r\n", pdu_len_except_smsc);
-
-		int i;
-		for (i = 0; i < pdu_len; ++i)
-			sprintf(pdustr+2*i, "%02X", pdu[i]);
-		sprintf(pdustr+2*i, "%c\r\n", 0x1A);   // End PDU mode with Ctrl-Z.
-
-		fputs("AT+CMGF=0\r\n", pf);
-		while(fgets(buf, sizeof(buf), pfi)) {
-			if(starts_with("OK", buf))
-				break;
-		}
-		fputs(cmdstr, pf);
-		sleep(1);
-		fputs(pdustr, pf);
-
-		alarm(5);
-		errno = 0;
-
-		while(fgets(buf, sizeof(buf), pfi))
-		{
-			if(starts_with("+CMGS:", buf))
-			{
-				printf("sms sent sucessfully: %s", buf + 7);
-				return 0;
-			} else if(starts_with("+CMS ERROR:", buf))
-			{
-				fprintf(stderr,"sms not sent, code: %s\n", buf + 11);
-			} else if(starts_with("ERROR", buf))
-			{
-				fprintf(stderr,"sms not sent, command error\n");
-			} else if(starts_with("OK", buf))
-			{
-				return 0;
-			}
-		}
-		fprintf(stderr,"reading port\n");
-	}
 
 	if (!strcmp("recv", argv[0]))
 	{
@@ -711,7 +1078,7 @@ int main(int argc, char* argv[])
 
 	if (!strcmp("at", argv[0]))
 	{
-		alarm(5);
+		alarm(user_set_timeout > 0 ? user_set_timeout : 5);
 		fputs(argv[1], pf);
 		fputs("\r\n", pf);
 
